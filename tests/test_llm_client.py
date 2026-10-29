@@ -98,6 +98,37 @@ def test_strict_schema_rejection_falls_back_to_best_effort_once():
     assert sdk.requests[-1]["response_format"]["json_schema"]["strict"] is False
 
 
+def test_strict_json_validate_failure_falls_back_once():
+    # The provider reports a missing required property even though the excerpt contains it;
+    # duplicate constraints keys also make the excerpt unreliable as proof of schema validity.
+    failed_generation = (
+        '{"blueprint": null, "constraints": {"budget": null, "budget": null}}'
+    )
+    err = status_error(
+        groq.BadRequestError,
+        400,
+        "code=json_validate_failed Generated JSON does not match the expected schema. "
+        f"jsonschema: '' does not validate with /required: missing properties: 'blueprint'. "
+        f"failed_generation={failed_generation}",
+    )
+    client, sdk = make([err, sdk_response('{"a": "x"}')])
+
+    result = client.generate_json(MSGS, SCHEMA, "demo")
+
+    assert result.text == '{"a": "x"}'
+    assert [r["response_format"]["json_schema"]["strict"] for r in sdk.requests] == [True, False]
+
+
+def test_best_effort_json_validate_failure_is_an_output_error_without_further_fallback():
+    err = status_error(groq.BadRequestError, 400, "code=json_validate_failed")
+    client, sdk = make([err], llm_strict_schema=False)
+
+    with pytest.raises(LLMOutputError):
+        client.generate_json(MSGS, SCHEMA, "demo")
+
+    assert len(sdk.requests) == 1
+
+
 def test_unrelated_400_is_a_request_error_not_a_fallback():
     err = status_error(groq.BadRequestError, 400, "invalid value for temperature")
     client, sdk = make([err])

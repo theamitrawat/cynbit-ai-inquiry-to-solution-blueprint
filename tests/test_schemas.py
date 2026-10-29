@@ -38,6 +38,24 @@ def test_stated_requirement_with_evidence_ok():
     assert r.origin == "stated"
 
 
+def test_stated_evidence_must_be_an_exact_quote_from_inquiry():
+    with pytest.raises(ValidationError, match="verbatim"):
+        Requirement.model_validate(
+            {"text": "Send rent reminders", "origin": "stated", "evidence": "rent is due"},
+            context={"inquiry_text": "We need a tool for reminders."},
+        )
+
+
+def test_client_constraints_must_be_quoted_from_inquiry():
+    with pytest.raises(ValidationError, match="verbatim"):
+        Extraction.model_validate(
+            {"service_categories": [ServiceCategory.SOFTWARE_DEVELOPMENT],
+             "discovery_questions": ["How many patients?"],
+             "constraints": {"user_scale": "2,000 patients"}},
+            context={"inquiry_text": "We run three clinics."},
+        )
+
+
 def test_inferred_requirement_needs_no_evidence():
     assert Requirement(text="Role-based access control", origin="inferred").evidence is None
 

@@ -83,8 +83,10 @@ class GroqClient:
             try:
                 resp = self._create(messages, schema, schema_name, self._strict)
             except groq.BadRequestError as exc:
-                if self._strict and _is_schema_rejection(exc):
-                    logger.warning("Groq rejected the strict schema; falling back to best-effort mode.")
+                if self._strict and (_is_schema_rejection(exc) or _is_strict_output_rejection(exc)):
+                    logger.warning(
+                        "Groq rejected strict structured output; retrying once in best-effort mode."
+                    )
                     self._strict = False
                     resp = self._create(messages, schema, schema_name, False)
                 else:
@@ -164,8 +166,23 @@ def _is_schema_rejection(exc: groq.BadRequestError) -> bool:
     return any(h in msg for h in _SCHEMA_REJECTED_HINTS)
 
 
+def _is_strict_output_rejection(exc: groq.BadRequestError) -> bool:
+    """Strict decoding should prevent these, but provider validation can still reject output.
+
+    Retry once in best-effort mode; the pipeline still validates the returned JSON locally.
+    This deliberately does not change how best-effort validation failures are classified.
+    """
+    return "json_validate_failed" in str(exc).lower()
+
+
 def _map_bad_request(exc: groq.BadRequestError) -> Exception:
     msg = str(exc).lower()
+
     if any(h in msg for h in _GENERATION_FAILED_HINTS):
-        return LLMOutputError("The model produced output that did not fit the required format.")
-    return LLMRequestError("Groq rejected the request (HTTP 400). Check LLM_MODEL and settings.")
+        return LLMOutputError(
+            "The model produced output that did not fit the required format."
+        )
+
+    return LLMRequestError(
+        "Groq rejected the request (HTTP 400). Check LLM_MODEL and settings."
+    )

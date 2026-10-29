@@ -71,7 +71,9 @@ def analyze_inquiry(
             completion_tokens += result.completion_tokens or 0
 
         try:
-            analysis = LLMAnalysis.model_validate_json(result.text)
+            analysis = LLMAnalysis.model_validate_json(
+                result.text, context={"inquiry_text": text}
+            )
         except ValidationError as exc:
             last_problem = _summarise_errors(exc)
             logger.warning("Attempt %d/%d: output failed validation (%d errors)",

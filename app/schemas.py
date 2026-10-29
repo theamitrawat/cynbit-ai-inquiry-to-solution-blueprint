@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 
 
 class StrictModel(BaseModel):
@@ -36,9 +36,14 @@ class Requirement(StrictModel):
     evidence: str | None = Field(default=None, max_length=300)  # verbatim quote if stated
 
     @model_validator(mode="after")
-    def stated_requires_evidence(self) -> "Requirement":
+    def stated_requires_evidence(self, info: ValidationInfo) -> "Requirement":
         if self.origin == "stated" and not self.evidence:
             raise ValueError("A 'stated' requirement must include a verbatim evidence quote.")
+        if self.origin == "inferred" and self.evidence is not None:
+            raise ValueError("An 'inferred' requirement must not include stated evidence.")
+        inquiry = (info.context or {}).get("inquiry_text")
+        if self.origin == "stated" and inquiry is not None and self.evidence not in inquiry:
+            raise ValueError("Evidence for a 'stated' requirement must appear verbatim in the inquiry.")
         return self
 
 
@@ -49,6 +54,16 @@ class ClientConstraints(StrictModel):
     timeline: str | None = None
     budget: str | None = None
     other: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def stated_values_appear_in_inquiry(self, info: ValidationInfo) -> "ClientConstraints":
+        inquiry = (info.context or {}).get("inquiry_text")
+        if inquiry is not None:
+            values = [self.user_scale, self.timeline, self.budget, *self.other]
+            for value in values:
+                if value is not None and value not in inquiry:
+                    raise ValueError("Client constraint values must appear verbatim in the inquiry.")
+        return self
 
 
 class MissingInfo(StrictModel):

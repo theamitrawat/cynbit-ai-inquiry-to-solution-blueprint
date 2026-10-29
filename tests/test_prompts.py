@@ -23,7 +23,8 @@ def test_prompt_places_blueprint_at_root_beside_extraction():
 
 def test_prompt_requires_evidence_and_forbids_invented_workflows():
     prompt = build_system_prompt()
-    assert "short VERBATIM quote" in prompt
+    assert "contiguous VERBATIM quote" in prompt
+    assert "preserving its spelling and punctuation" in prompt
     assert "must not add a new fact" in prompt
     assert "do not describe an existing workflow as manual, slow" in prompt
     assert "If none was stated, describe the requested outcome" in prompt

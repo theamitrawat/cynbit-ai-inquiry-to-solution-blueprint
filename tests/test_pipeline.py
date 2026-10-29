@@ -18,7 +18,7 @@ def test_happy_path_returns_unreviewed_draft_with_metadata():
     report = analyze_inquiry(INQUIRY, client, SETTINGS)
     assert report.review_status == ReviewStatus.DRAFT
     assert report.analysis.is_relevant and report.attempts == 1
-    assert report.model_name == "fake/model" and report.prompt_version == "v4"
+    assert report.model_name == "fake/model" and report.prompt_version == "v5"
     assert report.prompt_tokens == 100 and report.completion_tokens == 50
     assert report.latency_seconds is not None and report.inquiry_text == INQUIRY
 
@@ -74,6 +74,8 @@ def test_unsupported_stated_evidence_is_repaired():
 
     assert report.attempts == 2
     assert "appear verbatim in the inquiry" in client.calls[1][-1]["content"]
+    assert "exact contiguous quote from the original inquiry" in client.calls[1][-1]["content"]
+    assert "do not label it stated" in client.calls[1][-1]["content"]
 
 
 def test_missing_information_nested_in_constraints_is_repaired():

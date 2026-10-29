@@ -25,7 +25,11 @@ SCHEMA_NAME = "inquiry_analysis"
 
 _REPAIR_TEMPLATE = (
     "Your previous JSON failed validation with these errors:\n{errors}\n"
-    "Return the corrected JSON only. Do not add fields. Follow the rules in the system message."
+    "Return the corrected JSON only. Do not add fields. Follow the rules in the system message. "
+    "For any stated requirement, copy evidence as an exact contiguous quote from the original "
+    "inquiry, preserving spelling and punctuation; do not paraphrase or reconstruct it. If the "
+    "inquiry does not directly support a requirement, do not label it stated. Keep a reasonable "
+    "inference only as origin=inferred with evidence=null."
 )
 
 

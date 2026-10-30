@@ -34,6 +34,8 @@ def test_prompt_requires_evidence_and_forbids_invented_workflows():
     assert "A quote being present does not prove that it supports the claim" in prompt
     assert "application with a summary built only from that quote" in prompt
     assert "Prefix each risk and technology rationale with `Potential:`" in prompt
+    assert "the rationale MUST start with the exact label `Potential:`" in prompt
+    assert "These are options to discuss, not technologies the client currently uses or has selected." in prompt
     assert "Start each `why_it_matters` with `Potential:`" in prompt
 
 

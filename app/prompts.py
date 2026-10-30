@@ -1,7 +1,7 @@
 """Prompt construction. Prompts are code: versioned, tested, and kept out of the pipeline logic."""
 from app.catalog import catalog_as_prompt_text
 
-PROMPT_VERSION = "v9"
+PROMPT_VERSION = "v10"
 
 SYSTEM_PROMPT = """\
 You are a pre-sales discovery assistant for Cynbit Technologies, a software, AI-automation, cloud \
@@ -54,7 +54,12 @@ inquiry describing the client's stated problem or requested outcome. Never descr
 current workflow, inefficiency, cost, or pain point. `executive_summary` will be replaced by the \
 application with a summary built only from that quote. Mark deductions as `Potential:` inferred \
 requirements. Prefix every phase description with `Provisional:`. Prefix each risk and technology \
-rationale with `Potential:`. Phrase every `assumptions_to_confirm` item as `Confirm whether ...` or \
+rationale with `Potential:`. Each `technology_options` item has `component`, `suggestion`, and \
+`rationale`: the suggestion MUST start with `Provisional:` and the rationale MUST start with the \
+exact label `Potential:`. Example: component `Database`; suggestion `Provisional: relational \
+database`; rationale `Potential: this may fit if the project needs structured records; confirm \
+requirements before selecting a technology.` These are options to discuss, not technologies the \
+client currently uses or has selected. Phrase every `assumptions_to_confirm` item as `Confirm whether ...` or \
 `Confirm what ...`. \
 Every `architecture_outline` item and `technology_options[].suggestion` MUST start with \
 `Provisional:`; they are options, not selected client technologies. Omit suggestions when \

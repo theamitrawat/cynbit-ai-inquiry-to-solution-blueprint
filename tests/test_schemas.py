@@ -190,6 +190,21 @@ def test_technology_rationale_must_be_labeled_potential():
         )
 
 
+def test_technology_option_with_potential_rationale_is_valid():
+    from app.schemas import TechOption
+
+    option = TechOption(
+        component="Database",
+        suggestion="Provisional: relational database",
+        rationale=(
+            "Potential: this may fit if the project needs structured records; "
+            "confirm requirements before selecting a technology."
+        ),
+    )
+
+    assert option.rationale.startswith("Potential:")
+
+
 def test_phase_description_must_be_labeled_provisional():
     with pytest.raises(ValidationError, match="descriptions must be labeled provisional"):
         Phase(name="Discovery", description="Confirm requirements with the client.")

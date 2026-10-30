@@ -58,6 +58,13 @@ def _summarise_errors(exc: ValidationError, limit: int = 8) -> str:
             "substring copied from the original inquiry. Do not paraphrase. If no exact quote "
             "supports an item, remove it or mark it inferred only when it is a genuine inference."
         )
+    if any("Technology rationales must be labeled potential" in err["msg"] for err in errors):
+        lines.append(
+            "- Correction: every `blueprint.technology_options` item must keep its "
+            "`suggestion` prefixed with `Provisional:` and start its `rationale` with "
+            "the exact label `Potential:`. Describe a conditional option, not a confirmed "
+            "client technology or decision."
+        )
     return "\n".join(lines)
 
 
@@ -182,8 +189,11 @@ def analyze_inquiry(
     completion_tokens = 0
     saw_usage = False
     last_problem = "unknown"
+    previous_validation_problem: str | None = None
+    attempts_used = 0
 
     for attempt in range(1, max_attempts + 1):
+        attempts_used = attempt
         try:
             result = client.generate_json(messages, schema, SCHEMA_NAME)
         except LLMTruncatedError:
@@ -208,6 +218,13 @@ def analyze_inquiry(
             last_problem = _summarise_errors(exc)
             logger.warning("Attempt %d/%d: output failed validation (%d errors)",
                            attempt, max_attempts, exc.error_count())
+            if last_problem == previous_validation_problem:
+                logger.warning(
+                    "Stopping after the same validation errors repeated on attempt %d.",
+                    attempt,
+                )
+                break
+            previous_validation_problem = last_problem
             messages = messages + [
                 {"role": "assistant", "content": result.text},
                 {"role": "user", "content": _REPAIR_TEMPLATE.format(errors=last_problem)},
@@ -227,6 +244,6 @@ def analyze_inquiry(
         )
 
     raise LLMOutputError(
-        f"The model did not return a valid analysis after {max_attempts} attempts. "
+        f"The model did not return a valid analysis after {attempts_used} attempts. "
         f"Last problem: {last_problem}"
     )

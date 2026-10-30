@@ -23,7 +23,7 @@ def test_happy_path_returns_unreviewed_draft_with_metadata():
     report = analyze_inquiry(INQUIRY, client, SETTINGS)
     assert report.review_status == ReviewStatus.DRAFT
     assert report.analysis.is_relevant and report.attempts == 1
-    assert report.model_name == "fake/model" and report.prompt_version == "v9"
+    assert report.model_name == "fake/model" and report.prompt_version == "v10"
     assert report.prompt_tokens == 100 and report.completion_tokens == 50
     assert report.latency_seconds is not None and report.inquiry_text == INQUIRY
 
@@ -56,6 +56,65 @@ def test_schema_violation_is_repaired():
     client = FakeLLMClient([bad, valid_json()])
     assert analyze_inquiry(INQUIRY, client, SETTINGS).attempts == 2
     assert "extraction" in client.calls[1][-1]["content"]
+
+
+def test_provided_inquiry_accepts_valid_provisional_technology_options():
+    output = json.loads(valid_json())
+    output["blueprint"]["technology_options"] = [
+        {
+            "component": "Database",
+            "suggestion": "Provisional: relational database",
+            "rationale": (
+                "Potential: this may fit if appointment data needs structured relationships; "
+                "confirm data and integration requirements before selecting a technology."
+            ),
+        }
+    ]
+    client = FakeLLMClient([json.dumps(output)])
+
+    report = analyze_inquiry(SAMPLE_INQUIRY, client, SETTINGS)
+
+    assert report.attempts == 1
+    assert report.analysis.blueprint.technology_options[0].rationale.startswith("Potential:")
+
+
+def test_invalid_technology_rationale_is_repaired_with_specific_feedback():
+    output = json.loads(valid_json())
+    output["blueprint"]["technology_options"] = [
+        {
+            "component": "Database",
+            "suggestion": "Provisional: relational database",
+            "rationale": "Appointment records have structured relationships.",
+        }
+    ]
+    client = FakeLLMClient([json.dumps(output), valid_json()])
+
+    report = analyze_inquiry(SAMPLE_INQUIRY, client, SETTINGS)
+
+    assert report.attempts == 2
+    repair = client.calls[1][-1]["content"]
+    assert "blueprint.technology_options.0" in repair
+    assert "start its `rationale` with the exact label `Potential:`" in repair
+    assert "not a confirmed client technology or decision" in repair
+
+
+def test_repeated_same_validation_failure_stops_retrying_early():
+    output = json.loads(valid_json())
+    output["blueprint"]["technology_options"] = [
+        {
+            "component": "Database",
+            "suggestion": "Provisional: relational database",
+            "rationale": "Appointment records have structured relationships.",
+        }
+    ]
+    invalid_json = json.dumps(output)
+    client = FakeLLMClient([invalid_json, invalid_json, valid_json()])
+
+    with pytest.raises(LLMOutputError, match="after 2 attempts") as error:
+        analyze_inquiry(SAMPLE_INQUIRY, client, SETTINGS, max_attempts=3)
+
+    assert len(client.calls) == 2
+    assert "Technology rationales must be labeled potential" in str(error.value)
 
 
 def test_nested_blueprint_is_promoted_before_validation():

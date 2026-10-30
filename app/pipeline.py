@@ -13,6 +13,7 @@ import time
 
 from pydantic import ValidationError
 
+from app.catalog import catalog_names
 from app.config import Settings, get_settings
 from app.errors import LLMOutputError, LLMTruncatedError
 from app.llm_client import LLMClient
@@ -23,6 +24,7 @@ from app.validation import clean_inquiry
 logger = logging.getLogger(__name__)
 
 SCHEMA_NAME = "inquiry_analysis"
+MAX_ATTEMPTS = 3
 
 _REPAIR_TEMPLATE = (
     "Your previous JSON failed validation with these errors:\n{errors}\n"
@@ -59,41 +61,101 @@ def _summarise_errors(exc: ValidationError, limit: int = 8) -> str:
     return "\n".join(lines)
 
 
-def _normalise_safe_output(raw: str, inquiry: str) -> str:
-    """Apply only lossless structural/grounding corrections before Pydantic validation.
+def _normalise_safe_output(raw: str, inquiry: str) -> tuple[str, list[str]]:
+    """Apply narrow, evidence-based corrections before Pydantic validation.
 
-    A stated requirement is reduced to its verbatim evidence, and a misplaced blueprint is
-    promoted only when the root object does not already contain one. Ambiguous cases are left
-    untouched so normal validation rejects them.
+    The function promotes an unambiguous nested blueprint, uses verified quotes for stated
+    requirement text, removes requirements that repeat an explicit client constraint (with a
+    visible note), reframes unqualified assumptions as confirmation questions (with a note), and
+    builds the summary from the quoted business problem. Other invalid output is left untouched
+    for normal validation and the bounded repair path.
     """
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
-        return raw
+        return raw, []
     if not isinstance(data, dict):
-        return raw
+        return raw, []
 
     changed = False
+    normalization_notes: list[str] = []
     extraction = data.get("extraction")
     if isinstance(extraction, dict) and "blueprint" in extraction and "blueprint" not in data:
         data["blueprint"] = extraction.pop("blueprint")
         changed = True
 
     if isinstance(extraction, dict):
+        constraints = extraction.get("constraints")
+        constraint_values = []
+        if isinstance(constraints, dict):
+            constraint_values = [
+                value
+                for value in (
+                    constraints.get("user_scale"),
+                    constraints.get("timeline"),
+                    constraints.get("budget"),
+                )
+                if isinstance(value, str) and len(value) >= 6
+            ]
+
         for field in ("functional_requirements", "non_functional_requirements"):
             items = extraction.get(field)
             if not isinstance(items, list):
                 continue
+            kept_items = []
             for item in items:
-                if not isinstance(item, dict) or item.get("origin") != "stated":
+                if not isinstance(item, dict):
+                    kept_items.append(item)
                     continue
                 evidence = item.get("evidence")
+                if item.get("origin") == "stated" and isinstance(evidence, str):
+                    is_constraint = any(
+                        value.casefold() in evidence.casefold()
+                        for value in constraint_values
+                    )
+                    if is_constraint:
+                        note = (
+                            "A candidate requirement repeated a stated user-scale, timeline, "
+                            "or budget constraint. It was removed from the requirement list; "
+                            "confirm its category during human review."
+                        )
+                        if note not in normalization_notes:
+                            normalization_notes.append(note)
+                        changed = True
+                        continue
                 if isinstance(evidence, str) and evidence and evidence in inquiry:
                     if item.get("text") != evidence:
                         item["text"] = evidence
                         changed = True
+                kept_items.append(item)
+            if len(kept_items) != len(items):
+                extraction[field] = kept_items
 
-    return json.dumps(data, ensure_ascii=False) if changed else raw
+    blueprint = data.get("blueprint")
+    if isinstance(blueprint, dict):
+        business_problem = blueprint.get("business_problem")
+        if isinstance(business_problem, str) and business_problem and business_problem in inquiry:
+            summary = f'Inquiry excerpt (verbatim; verify intent): "{business_problem}"'
+            if blueprint.get("executive_summary") != summary:
+                blueprint["executive_summary"] = summary
+                changed = True
+        assumptions = blueprint.get("assumptions_to_confirm")
+        if isinstance(assumptions, list):
+            for index, assumption in enumerate(assumptions):
+                if isinstance(assumption, str) and not assumption.casefold().startswith("confirm "):
+                    assumptions[index] = (
+                        f"Confirm whether this assumption is true: {assumption}"
+                    )
+                    note = (
+                        "A blueprint assumption was framed as a human confirmation question; "
+                        "review the assumption before using it."
+                    )
+                    if note not in normalization_notes:
+                        normalization_notes.append(note)
+                    changed = True
+
+    normalised = json.dumps(data, ensure_ascii=False) if changed else raw
+    return normalised, normalization_notes
 
 
 def analyze_inquiry(
@@ -102,6 +164,13 @@ def analyze_inquiry(
     settings: Settings | None = None,
     max_attempts: int = 2,
 ) -> AnalysisReport:
+    if (
+        not isinstance(max_attempts, int)
+        or isinstance(max_attempts, bool)
+        or not 1 <= max_attempts <= MAX_ATTEMPTS
+    ):
+        raise ValueError(f"max_attempts must be between 1 and {MAX_ATTEMPTS}.")
+
     settings = settings or get_settings()
     text = clean_inquiry(raw_text, settings)  # raises InvalidInquiryError
 
@@ -129,9 +198,11 @@ def analyze_inquiry(
             prompt_tokens += result.prompt_tokens
             completion_tokens += result.completion_tokens or 0
 
+        normalized_output, normalization_notes = _normalise_safe_output(result.text, text)
         try:
             analysis = LLMAnalysis.model_validate_json(
-                _normalise_safe_output(result.text, text), context={"inquiry_text": text}
+                normalized_output,
+                context={"inquiry_text": text, "catalog_names": catalog_names()},
             )
         except ValidationError as exc:
             last_problem = _summarise_errors(exc)
@@ -146,6 +217,7 @@ def analyze_inquiry(
         return AnalysisReport(
             inquiry_text=text,
             analysis=analysis,
+            normalization_notes=normalization_notes,
             model_name=client.model_name,
             prompt_version=PROMPT_VERSION,
             attempts=attempt,

@@ -9,7 +9,6 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # --- LLM (Groq) ---
-    llm_provider: str = "groq"
     llm_model: str = "openai/gpt-oss-20b"
     llm_api_key: SecretStr | None = None  # SecretStr: never printed in logs/repr
     llm_strict_schema: bool = True

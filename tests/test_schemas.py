@@ -10,7 +10,10 @@ from app.schemas import (
 def make_extraction(**overrides) -> Extraction:
     data = dict(
         service_categories=[ServiceCategory.SOFTWARE_DEVELOPMENT],
-        missing_information=[MissingInfo(topic="supported platforms", why_it_matters="This informs design.")],
+        missing_information=[MissingInfo(
+            topic="supported platforms",
+            why_it_matters="Potential: this informs design.",
+        )],
         discovery_questions=[DiscoveryQuestion(
             question="Which platforms must be supported?",
             missing_information_topic="supported platforms",
@@ -25,7 +28,10 @@ def make_blueprint(**overrides) -> BlueprintDraft:
         executive_summary="Draft summary of a web app for managing bookings for a small business.",
         business_problem="We want a booking app for our salon.",
         architecture_outline=["Provisional: Web frontend", "Provisional: REST API", "Provisional: Relational database"],
-        phases=[Phase(name="Discovery", description="Confirm requirements with the client.")],
+        phases=[Phase(
+            name="Discovery",
+            description="Provisional: confirm requirements with the client.",
+        )],
         assumptions_to_confirm=["Confirm whether the client wants a web app, a mobile app, or both."],
     )
     data.update(overrides)
@@ -48,6 +54,47 @@ def test_stated_evidence_must_be_an_exact_quote_from_inquiry():
             {"text": "rent is due", "origin": "stated", "evidence": "rent is due"},
             context={"inquiry_text": "We need a tool for reminders."},
         )
+
+
+def test_objectives_must_be_verbatim_quotes_from_inquiry():
+    with pytest.raises(ValidationError, match="Objectives must be verbatim"):
+        Extraction.model_validate(
+            {"service_categories": [ServiceCategory.SOFTWARE_DEVELOPMENT],
+             "objectives": ["Improve clinic operations"],
+             "discovery_questions": [DiscoveryQuestion(
+                 question="Which platforms do you need?",
+                 missing_information_topic="supported platforms",
+             )],
+             "missing_information": [{
+                 "topic": "supported platforms",
+                 "why_it_matters": "Potential: this informs design.",
+             }]},
+            context={"inquiry_text": "We want a web app for appointments."},
+        )
+
+
+def test_timeline_quote_cannot_also_be_a_stated_requirement():
+    with pytest.raises(ValidationError, match="must not be classified as a requirement"):
+        make_extraction(
+            constraints={"timeline": "before March"},
+            functional_requirements=[
+                Requirement(
+                    text="before March",
+                    origin="stated",
+                    evidence="before March",
+                )
+            ],
+        )
+
+
+def test_missing_information_rationale_must_be_labeled_potential():
+    with pytest.raises(ValidationError, match="rationales must be labeled potential"):
+        MissingInfo(topic="supported platforms", why_it_matters="This informs design.")
+
+
+def test_inferred_business_domain_must_be_labeled_potential():
+    with pytest.raises(ValidationError, match="business domain must be labeled potential"):
+        make_extraction(business_domain="Healthcare")
 
 
 def test_stated_requirement_cannot_add_details_beyond_its_quote():
@@ -94,7 +141,9 @@ def test_conflict_statements_must_be_quoted_from_inquiry():
              "discovery_questions": [DiscoveryQuestion(
                  question="What timeline do you mean?", missing_information_topic="timeline"
              )],
-             "missing_information": [{"topic": "timeline", "why_it_matters": "It affects scope."}],
+             "missing_information": [{
+                 "topic": "timeline", "why_it_matters": "Potential: it affects scope."
+             }],
              "conflicts": [{"statement_a": "launch tomorrow", "statement_b": "build everything",
                             "explanation": "The scope and schedule conflict."}]},
             context={"inquiry_text": "We need a website."},
@@ -110,12 +159,13 @@ def test_conflict_can_be_returned_with_two_source_quotes():
              missing_information_topic="security review schedule",
          )],
          "missing_information": [{
-             "topic": "security review schedule", "why_it_matters": "It affects launch readiness."
+             "topic": "security review schedule",
+             "why_it_matters": "Potential: it affects launch readiness.",
          }],
          "conflicts": [{
              "statement_a": "We need launch in one week.",
              "statement_b": "Do not launch before security review is complete.",
-             "explanation": "The requested launch date may precede review completion.",
+             "explanation": "Potential: the requested launch date may precede review completion.",
          }]},
         context={"inquiry_text": text},
     )
@@ -127,6 +177,34 @@ def test_technology_suggestions_must_be_provisional():
 
     with pytest.raises(ValidationError, match="labeled provisional"):
         TechOption(component="Database", suggestion="PostgreSQL", rationale="Relational storage.")
+
+
+def test_technology_rationale_must_be_labeled_potential():
+    from app.schemas import TechOption
+
+    with pytest.raises(ValidationError, match="rationales must be labeled potential"):
+        TechOption(
+            component="Database",
+            suggestion="Provisional: relational database",
+            rationale="The inquiry implies structured records.",
+        )
+
+
+def test_phase_description_must_be_labeled_provisional():
+    with pytest.raises(ValidationError, match="descriptions must be labeled provisional"):
+        Phase(name="Discovery", description="Confirm requirements with the client.")
+
+
+def test_risks_must_be_labeled_potential():
+    with pytest.raises(ValidationError, match="risk must be labeled potential"):
+        make_blueprint(risks=["Sensitive data may need extra safeguards."])
+
+
+def test_assumptions_must_be_explicitly_marked_for_confirmation():
+    with pytest.raises(ValidationError, match="human confirmation"):
+        make_blueprint(
+            assumptions_to_confirm=["The client has an existing CRM."]
+        )
 
 
 def test_llm_cannot_add_cost_field_to_blueprint():
@@ -181,6 +259,7 @@ def test_report_defaults_to_unreviewed_draft():
                            extraction=make_extraction(), blueprint=make_blueprint())
     report = AnalysisReport(inquiry_text="We need a booking app for our salon.", analysis=analysis)
     assert report.review_status == ReviewStatus.DRAFT
+    assert report.normalization_notes == []
     assert "not a proposal" in report.disclaimer.lower()
 
 

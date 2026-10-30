@@ -8,3 +8,7 @@ __pycache__/
 
 # pytest
 .pytest_cache/
+
+# Temporary output
+*.tmp
+*.log

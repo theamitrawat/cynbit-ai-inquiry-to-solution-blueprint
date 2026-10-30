@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 
 class StrictModel(BaseModel):
@@ -74,6 +74,13 @@ class MissingInfo(StrictModel):
     topic: str = Field(min_length=2, max_length=120)
     why_it_matters: str = Field(min_length=3, max_length=300)
 
+    @field_validator("why_it_matters")
+    @classmethod
+    def rationale_is_potential(cls, value: str) -> str:
+        if not value.casefold().startswith("potential:"):
+            raise ValueError("Missing-information rationales must be labeled potential.")
+        return value
+
 
 class DiscoveryQuestion(StrictModel):
     question: str = Field(min_length=5, max_length=300)
@@ -93,6 +100,8 @@ class Conflict(StrictModel):
                 raise ValueError("Both conflict statements must be verbatim quotes from the inquiry.")
             if self.statement_a == self.statement_b:
                 raise ValueError("A conflict requires two distinct statements.")
+        if not self.explanation.casefold().startswith("potential:"):
+            raise ValueError("Conflict explanations must be labeled potential.")
         return self
 
 
@@ -109,6 +118,35 @@ class Extraction(StrictModel):
     # Names must come from the Cynbit catalog (checked in the pipeline, Stage 3)
     overlapping_offerings: list[str] = Field(default_factory=list, max_length=5)
 
+    @field_validator("objectives")
+    @classmethod
+    def objectives_are_quoted(cls, values: list[str], info: ValidationInfo) -> list[str]:
+        inquiry = (info.context or {}).get("inquiry_text")
+        if inquiry is not None and any(value not in inquiry for value in values):
+            raise ValueError("Objectives must be verbatim quotes from the inquiry.")
+        return values
+
+    @field_validator("business_domain")
+    @classmethod
+    def business_domain_is_qualified(cls, value: str | None) -> str | None:
+        if value is not None and not value.casefold().startswith("potential:"):
+            raise ValueError("An inferred business domain must be labeled potential.")
+        return value
+
+    @field_validator("overlapping_offerings")
+    @classmethod
+    def offerings_are_in_catalog(
+        cls, values: list[str], info: ValidationInfo
+    ) -> list[str]:
+        available = (info.context or {}).get("catalog_names")
+        if available is not None:
+            unknown = set(values) - set(available)
+            if unknown:
+                raise ValueError(
+                    f"Offerings must match the public catalog; unknown names: {sorted(unknown)}."
+                )
+        return values
+
     @model_validator(mode="after")
     def questions_reference_missing_information(self) -> "Extraction":
         topics = {item.topic for item in self.missing_information}
@@ -116,6 +154,30 @@ class Extraction(StrictModel):
             if item.missing_information_topic not in topics:
                 raise ValueError(
                     "Each discovery question must reference a topic in missing_information."
+                )
+        return self
+
+    @model_validator(mode="after")
+    def constraints_are_not_requirements(self) -> "Extraction":
+        constraint_values = [
+            value for value in (
+                self.constraints.user_scale,
+                self.constraints.timeline,
+                self.constraints.budget,
+            )
+            if value
+        ]
+        requirements = (
+            self.functional_requirements + self.non_functional_requirements
+        )
+        for requirement in requirements:
+            if requirement.origin != "stated" or requirement.evidence is None:
+                continue
+            evidence = requirement.evidence.casefold()
+            if any(value.casefold() in evidence for value in constraint_values):
+                raise ValueError(
+                    "A user-scale, timeline, or budget constraint must not be classified "
+                    "as a requirement."
                 )
         return self
 
@@ -129,6 +191,8 @@ class TechOption(StrictModel):
     def suggestion_is_provisional(self) -> "TechOption":
         if not self.suggestion.casefold().startswith("provisional:"):
             raise ValueError("Technology suggestions must be labeled provisional.")
+        if not self.rationale.casefold().startswith("potential:"):
+            raise ValueError("Technology rationales must be labeled potential.")
         return self
 
 
@@ -136,6 +200,13 @@ class Phase(StrictModel):
     # Deliberately NO duration/cost fields.
     name: str = Field(min_length=2, max_length=80)
     description: str = Field(min_length=3, max_length=400)
+
+    @field_validator("description")
+    @classmethod
+    def descriptions_are_provisional(cls, value: str) -> str:
+        if not value.casefold().startswith("provisional:"):
+            raise ValueError("Phase descriptions must be labeled provisional.")
+        return value
 
 
 class BlueprintDraft(StrictModel):
@@ -157,7 +228,9 @@ class BlueprintDraft(StrictModel):
         if any(not item.casefold().startswith("provisional:") for item in self.architecture_outline):
             raise ValueError("Every architecture item must be labeled provisional.")
         if any(not item.casefold().startswith("confirm ") for item in self.assumptions_to_confirm):
-            raise ValueError("Each assumption must be phrased as a human confirmation question.")
+            raise ValueError("Each assumption must be framed as a human confirmation.")
+        if any(not item.casefold().startswith("potential:") for item in self.risks):
+            raise ValueError("Each risk must be labeled potential.")
         return self
 
 
@@ -199,6 +272,7 @@ class AnalysisReport(StrictModel):
     analysis: LLMAnalysis
     review_status: ReviewStatus = ReviewStatus.DRAFT
     reviewer_notes: str = ""
+    normalization_notes: list[str] = Field(default_factory=list)
     model_name: str = ""
     prompt_version: str = ""
     attempts: int = Field(default=1, ge=1)

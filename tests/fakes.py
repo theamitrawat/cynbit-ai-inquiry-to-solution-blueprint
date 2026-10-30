@@ -13,15 +13,16 @@ def valid_analysis() -> LLMAnalysis:
         is_relevant=True,
         relevance_note="Genuine software project inquiry.",
         extraction=Extraction(
-            business_domain="Healthcare scheduling",
-            objectives=["Let patients book online"],
+            business_domain="Potential: healthcare scheduling",
+            objectives=["book appointments online"],
             functional_requirements=[
                 Requirement(text="book appointments online", origin="stated",
                             evidence="book appointments online"),
                 Requirement(text="Potential: role-based access for staff", origin="inferred"),
             ],
             missing_information=[MissingInfo(
-                topic="SMS provider", why_it_matters="This determines the integration approach."
+                topic="SMS provider",
+                why_it_matters="Potential: this determines the integration approach.",
             )],
             service_categories=[ServiceCategory.SOFTWARE_DEVELOPMENT],
             discovery_questions=[DiscoveryQuestion(
@@ -35,7 +36,10 @@ def valid_analysis() -> LLMAnalysis:
             architecture_outline=[
                 "Provisional: Web frontend", "Provisional: API backend", "Provisional: Database"
             ],
-            phases=[Phase(name="Discovery", description="Confirm requirements with the client.")],
+            phases=[Phase(
+                name="Discovery",
+                description="Provisional: confirm requirements with the client.",
+            )],
             assumptions_to_confirm=["Confirm whether the inquiry is limited to a web app."],
         ),
     )

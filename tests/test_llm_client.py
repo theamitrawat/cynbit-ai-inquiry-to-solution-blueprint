@@ -86,11 +86,12 @@ def test_schema_mismatch_400_is_an_output_error():
         client.generate_json(MSGS, SCHEMA, "demo")
 
 
-def test_strict_schema_rejection_falls_back_to_best_effort_once():
+def test_strict_schema_rejection_falls_back_to_best_effort_once(caplog):
     err = status_error(groq.BadRequestError, 400, "This model does not support response format `json_schema`.")
     client, sdk = make([err, sdk_response('{"a": "x"}')])
     r = client.generate_json(MSGS, SCHEMA, "demo")
     assert r.text == '{"a": "x"}'
+    assert "schema or response-format compatibility" in caplog.text
     assert [q["response_format"]["json_schema"]["strict"] for q in sdk.requests] == [True, False]
     # and it remembers: next call goes straight to best-effort
     sdk.script.append(sdk_response("{}"))
@@ -98,7 +99,7 @@ def test_strict_schema_rejection_falls_back_to_best_effort_once():
     assert sdk.requests[-1]["response_format"]["json_schema"]["strict"] is False
 
 
-def test_strict_json_validate_failure_falls_back_once():
+def test_strict_json_validate_failure_falls_back_once(caplog):
     # The provider reports a missing required property even though the excerpt contains it;
     # duplicate constraints keys also make the excerpt unreliable as proof of schema validity.
     failed_generation = (
@@ -116,6 +117,7 @@ def test_strict_json_validate_failure_falls_back_once():
     result = client.generate_json(MSGS, SCHEMA, "demo")
 
     assert result.text == '{"a": "x"}'
+    assert "provider output validation" in caplog.text
     assert [r["response_format"]["json_schema"]["strict"] for r in sdk.requests] == [True, False]
 
 

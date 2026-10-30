@@ -84,8 +84,15 @@ class GroqClient:
                 resp = self._create(messages, schema, schema_name, self._strict)
             except groq.BadRequestError as exc:
                 if self._strict and (_is_schema_rejection(exc) or _is_strict_output_rejection(exc)):
+                    rejection_type = (
+                        "provider output validation"
+                        if _is_strict_output_rejection(exc)
+                        else "schema or response-format compatibility"
+                    )
                     logger.warning(
-                        "Groq rejected strict structured output; retrying once in best-effort mode."
+                        "Groq rejected strict structured output (%s); "
+                        "retrying once in best-effort mode.",
+                        rejection_type,
                     )
                     self._strict = False
                     resp = self._create(messages, schema, schema_name, False)

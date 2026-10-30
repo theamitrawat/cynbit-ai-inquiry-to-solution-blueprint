@@ -3,7 +3,8 @@ from types import SimpleNamespace
 
 from app.llm_client import LLMResult
 from app.schemas import (
-    BlueprintDraft, Extraction, LLMAnalysis, Phase, Requirement, ServiceCategory,
+    BlueprintDraft, DiscoveryQuestion, Extraction, LLMAnalysis, MissingInfo, Phase,
+    Requirement, ServiceCategory,
 )
 
 
@@ -15,19 +16,27 @@ def valid_analysis() -> LLMAnalysis:
             business_domain="Healthcare scheduling",
             objectives=["Let patients book online"],
             functional_requirements=[
-                Requirement(text="Online appointment booking", origin="stated",
+                Requirement(text="book appointments online", origin="stated",
                             evidence="book appointments online"),
-                Requirement(text="Role-based access for staff", origin="inferred"),
+                Requirement(text="Potential: role-based access for staff", origin="inferred"),
             ],
+            missing_information=[MissingInfo(
+                topic="SMS provider", why_it_matters="This determines the integration approach."
+            )],
             service_categories=[ServiceCategory.SOFTWARE_DEVELOPMENT],
-            discovery_questions=["Which SMS provider do you use today?"],
+            discovery_questions=[DiscoveryQuestion(
+                question="Which SMS provider do you use today?",
+                missing_information_topic="SMS provider",
+            )],
         ),
         blueprint=BlueprintDraft(
             executive_summary="Draft outline of a clinic appointment booking web application.",
-            business_problem="Appointments are not bookable online.",
-            architecture_outline=["Web frontend", "API backend", "Database"],
+            business_problem="book appointments online",
+            architecture_outline=[
+                "Provisional: Web frontend", "Provisional: API backend", "Provisional: Database"
+            ],
             phases=[Phase(name="Discovery", description="Confirm requirements with the client.")],
-            assumptions_to_confirm=["Web only, no native mobile app."],
+            assumptions_to_confirm=["Confirm whether the inquiry is limited to a web app."],
         ),
     )
 

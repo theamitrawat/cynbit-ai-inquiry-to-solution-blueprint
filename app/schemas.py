@@ -41,6 +41,10 @@ class Requirement(StrictModel):
             raise ValueError("A 'stated' requirement must include a verbatim evidence quote.")
         if self.origin == "inferred" and self.evidence is not None:
             raise ValueError("An 'inferred' requirement must not include stated evidence.")
+        if self.origin == "inferred" and not self.text.casefold().startswith("potential:"):
+            raise ValueError("An inferred requirement must be phrased as a potential need.")
+        if self.origin == "stated" and self.text != self.evidence:
+            raise ValueError("A stated requirement's text must match its evidence exactly.")
         inquiry = (info.context or {}).get("inquiry_text")
         if self.origin == "stated" and inquiry is not None and self.evidence not in inquiry:
             raise ValueError("Evidence for a 'stated' requirement must appear verbatim in the inquiry.")
@@ -71,6 +75,27 @@ class MissingInfo(StrictModel):
     why_it_matters: str = Field(min_length=3, max_length=300)
 
 
+class DiscoveryQuestion(StrictModel):
+    question: str = Field(min_length=5, max_length=300)
+    missing_information_topic: str = Field(min_length=2, max_length=120)
+
+
+class Conflict(StrictModel):
+    statement_a: str = Field(min_length=3, max_length=300)
+    statement_b: str = Field(min_length=3, max_length=300)
+    explanation: str = Field(min_length=5, max_length=300)
+
+    @model_validator(mode="after")
+    def statements_are_quoted(self, info: ValidationInfo) -> "Conflict":
+        inquiry = (info.context or {}).get("inquiry_text")
+        if inquiry is not None:
+            if self.statement_a not in inquiry or self.statement_b not in inquiry:
+                raise ValueError("Both conflict statements must be verbatim quotes from the inquiry.")
+            if self.statement_a == self.statement_b:
+                raise ValueError("A conflict requires two distinct statements.")
+        return self
+
+
 class Extraction(StrictModel):
     business_domain: str | None = Field(default=None, max_length=120)
     objectives: list[str] = Field(default_factory=list, max_length=10)
@@ -79,16 +104,32 @@ class Extraction(StrictModel):
     constraints: ClientConstraints = Field(default_factory=ClientConstraints)
     service_categories: list[ServiceCategory] = Field(min_length=1)
     missing_information: list[MissingInfo] = Field(default_factory=list, max_length=15)
-    discovery_questions: list[str] = Field(min_length=1, max_length=12)
-    conflicts: list[str] = Field(default_factory=list, max_length=8)
+    discovery_questions: list[DiscoveryQuestion] = Field(min_length=1, max_length=12)
+    conflicts: list[Conflict] = Field(default_factory=list, max_length=8)
     # Names must come from the Cynbit catalog (checked in the pipeline, Stage 3)
     overlapping_offerings: list[str] = Field(default_factory=list, max_length=5)
+
+    @model_validator(mode="after")
+    def questions_reference_missing_information(self) -> "Extraction":
+        topics = {item.topic for item in self.missing_information}
+        for item in self.discovery_questions:
+            if item.missing_information_topic not in topics:
+                raise ValueError(
+                    "Each discovery question must reference a topic in missing_information."
+                )
+        return self
 
 
 class TechOption(StrictModel):
     component: str = Field(min_length=2, max_length=80)
     suggestion: str = Field(min_length=2, max_length=120)
     rationale: str = Field(min_length=3, max_length=300)
+
+    @model_validator(mode="after")
+    def suggestion_is_provisional(self) -> "TechOption":
+        if not self.suggestion.casefold().startswith("provisional:"):
+            raise ValueError("Technology suggestions must be labeled provisional.")
+        return self
 
 
 class Phase(StrictModel):
@@ -106,6 +147,19 @@ class BlueprintDraft(StrictModel):
     risks: list[str] = Field(default_factory=list, max_length=10)
     assumptions_to_confirm: list[str] = Field(min_length=1, max_length=12)
 
+    @model_validator(mode="after")
+    def narrative_is_grounded_and_qualified(self, info: ValidationInfo) -> "BlueprintDraft":
+        inquiry = (info.context or {}).get("inquiry_text")
+        if inquiry is not None and self.business_problem not in inquiry:
+            raise ValueError(
+                "business_problem must be a verbatim quote from the inquiry, not an inferred workflow."
+            )
+        if any(not item.casefold().startswith("provisional:") for item in self.architecture_outline):
+            raise ValueError("Every architecture item must be labeled provisional.")
+        if any(not item.casefold().startswith("confirm ") for item in self.assumptions_to_confirm):
+            raise ValueError("Each assumption must be phrased as a human confirmation question.")
+        return self
+
 
 class LLMAnalysis(StrictModel):
     """Exactly what we ask the LLM to return."""
@@ -119,6 +173,8 @@ class LLMAnalysis(StrictModel):
     def relevance_consistency(self) -> "LLMAnalysis":
         if self.is_relevant and self.extraction is None:
             raise ValueError("Relevant inquiries must include an extraction.")
+        if self.is_relevant and self.blueprint is None:
+            raise ValueError("Relevant inquiries must include a blueprint draft.")
         if not self.is_relevant and (self.extraction is not None or self.blueprint is not None):
             raise ValueError("Irrelevant inquiries must not include extraction or blueprint.")
         return self

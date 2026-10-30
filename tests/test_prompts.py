@@ -22,13 +22,15 @@ def test_prompt_places_blueprint_at_root_beside_extraction():
 
 
 def test_prompt_requires_evidence_and_forbids_invented_workflows():
-    prompt = build_system_prompt()
+    prompt = " ".join(build_system_prompt().split())
     assert "contiguous VERBATIM quote" in prompt
-    assert "preserving its spelling and punctuation" in prompt
-    assert "must not add a new fact" in prompt
+    assert "`text` and `evidence` MUST be identical" in prompt
     assert "do not describe an existing workflow as manual, slow" in prompt
-    assert "If none was stated, describe the requested outcome" in prompt
-    assert "Technology suggestions are provisional options" in prompt
+    assert "`business_problem` MUST be an exact contiguous quote" in prompt
+    assert "Each item has `question` and `missing_information_topic`" in prompt
+    assert "two distinct parts of the inquiry" in prompt
+    assert "Every `architecture_outline` item and `technology_options[].suggestion` MUST start with" in prompt
+    assert "Phrase every `assumptions_to_confirm` item" in prompt
 
 
 def test_messages_shape():

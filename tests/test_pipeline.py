@@ -18,7 +18,7 @@ def test_happy_path_returns_unreviewed_draft_with_metadata():
     report = analyze_inquiry(INQUIRY, client, SETTINGS)
     assert report.review_status == ReviewStatus.DRAFT
     assert report.analysis.is_relevant and report.attempts == 1
-    assert report.model_name == "fake/model" and report.prompt_version == "v5"
+    assert report.model_name == "fake/model" and report.prompt_version == "v8"
     assert report.prompt_tokens == 100 and report.completion_tokens == 50
     assert report.latency_seconds is not None and report.inquiry_text == INQUIRY
 
@@ -53,15 +53,15 @@ def test_schema_violation_is_repaired():
     assert "extraction" in client.calls[1][-1]["content"]
 
 
-def test_nested_blueprint_is_repaired_to_root_level():
+def test_nested_blueprint_is_promoted_before_validation():
     bad = json.loads(valid_json())
     bad["extraction"]["blueprint"] = bad.pop("blueprint")
     client = FakeLLMClient([json.dumps(bad), valid_json()])
 
     report = analyze_inquiry(INQUIRY, client, SETTINGS)
 
-    assert report.attempts == 2
-    assert "extraction.blueprint" in client.calls[1][-1]["content"]
+    assert report.attempts == 1
+    assert len(client.calls) == 1
     assert report.analysis.blueprint is not None
 
 
@@ -73,9 +73,24 @@ def test_unsupported_stated_evidence_is_repaired():
     report = analyze_inquiry(INQUIRY, client, SETTINGS)
 
     assert report.attempts == 2
-    assert "appear verbatim in the inquiry" in client.calls[1][-1]["content"]
+    assert "text must match its evidence exactly" in client.calls[1][-1]["content"]
     assert "exact contiguous quote from the original inquiry" in client.calls[1][-1]["content"]
     assert "do not label it stated" in client.calls[1][-1]["content"]
+    assert "replace each rejected evidence value" in client.calls[1][-1]["content"]
+
+
+def test_stated_requirement_text_is_reduced_to_verified_quote():
+    output = json.loads(valid_json())
+    requirement = output["extraction"]["functional_requirements"][0]
+    requirement["text"] = "Patients can create accounts and book appointments online"
+    client = FakeLLMClient([json.dumps(output)])
+
+    report = analyze_inquiry(INQUIRY, client, SETTINGS)
+
+    assert report.attempts == 1
+    actual = report.analysis.extraction.functional_requirements[0]
+    assert actual.text == "book appointments online"
+    assert actual.text == actual.evidence
 
 
 def test_missing_information_nested_in_constraints_is_repaired():

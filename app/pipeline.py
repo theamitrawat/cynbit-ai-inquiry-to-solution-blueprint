@@ -7,6 +7,7 @@ Failure policy:
                             model its own output + the exact errors and ask for a corrected version.
   - Still failing        -> LLMOutputError with a clear message. We never return unvalidated data.
 """
+import json
 import logging
 import time
 
@@ -34,11 +35,65 @@ _REPAIR_TEMPLATE = (
 
 
 def _summarise_errors(exc: ValidationError, limit: int = 8) -> str:
+    errors = exc.errors()
     lines = []
-    for err in exc.errors()[:limit]:
+    for err in errors[:limit]:
         loc = ".".join(str(p) for p in err["loc"]) or "(root)"
         lines.append(f"- {loc}: {err['msg']}")
+    locations = {tuple(err["loc"]) for err in errors}
+    if any(loc[:2] == ("extraction", "blueprint") for loc in locations):
+        lines.append(
+            "- Correction: move `blueprint` to the root object as a sibling of `extraction`; "
+            "remove it from inside `extraction`."
+        )
+    if any(
+        "Evidence for a 'stated' requirement" in err["msg"]
+        or "stated requirement's text must match its evidence" in err["msg"]
+        for err in errors
+    ):
+        lines.append(
+            "- Correction: replace each rejected evidence value with an exact, contiguous "
+            "substring copied from the original inquiry. Do not paraphrase. If no exact quote "
+            "supports an item, remove it or mark it inferred only when it is a genuine inference."
+        )
     return "\n".join(lines)
+
+
+def _normalise_safe_output(raw: str, inquiry: str) -> str:
+    """Apply only lossless structural/grounding corrections before Pydantic validation.
+
+    A stated requirement is reduced to its verbatim evidence, and a misplaced blueprint is
+    promoted only when the root object does not already contain one. Ambiguous cases are left
+    untouched so normal validation rejects them.
+    """
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return raw
+    if not isinstance(data, dict):
+        return raw
+
+    changed = False
+    extraction = data.get("extraction")
+    if isinstance(extraction, dict) and "blueprint" in extraction and "blueprint" not in data:
+        data["blueprint"] = extraction.pop("blueprint")
+        changed = True
+
+    if isinstance(extraction, dict):
+        for field in ("functional_requirements", "non_functional_requirements"):
+            items = extraction.get(field)
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict) or item.get("origin") != "stated":
+                    continue
+                evidence = item.get("evidence")
+                if isinstance(evidence, str) and evidence and evidence in inquiry:
+                    if item.get("text") != evidence:
+                        item["text"] = evidence
+                        changed = True
+
+    return json.dumps(data, ensure_ascii=False) if changed else raw
 
 
 def analyze_inquiry(
@@ -76,7 +131,7 @@ def analyze_inquiry(
 
         try:
             analysis = LLMAnalysis.model_validate_json(
-                result.text, context={"inquiry_text": text}
+                _normalise_safe_output(result.text, text), context={"inquiry_text": text}
             )
         except ValidationError as exc:
             last_problem = _summarise_errors(exc)
